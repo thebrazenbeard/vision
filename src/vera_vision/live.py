@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import queue
+import math
 import subprocess
 import sys
 import threading
@@ -152,7 +153,7 @@ class FFmpegFrames:
         """Return up to max_frames or max_seconds; explicit finite bounds mandatory."""
         if type(max_frames) is not int or not 1 <= max_frames <= 100_000:
             raise ValueError("max_frames out of bounds")
-        if type(max_seconds) not in (int, float) or not 0.1 <= max_seconds <= 3600:
+        if type(max_seconds) not in (int, float) or not math.isfinite(max_seconds) or not 0.1 <= max_seconds <= 3600:
             raise ValueError("max_seconds out of bounds")
         if self._process is not None:
             raise RuntimeError("reader already active")
