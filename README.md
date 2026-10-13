@@ -45,7 +45,7 @@ Vision's long-term scope is **continuous visual attention**, not a screenshot ut
 - **Controlled image input:** strict RGBA/filter-zero PNG decoder for known local encoders, with CRC and decompression-size limits. It is intentionally not a general PNG decoder.
 - **Explicit limits:** defaults of 320×180 at 2 FPS, bounded to 640×360 and 15 FPS; sessions default to at most 100 observations or 60 seconds (configurable within fixed ceilings). This is bounded continuous sampling, **not yet real-time guaranteed latency**.
 
-Nothing in this package requires a cloud service or pays for inference. Video data is private by default and is not uploaded by the built-in pipeline.
+The default pipeline performs no model inference or cloud call. Optional explicitly selected local-model inference uses Ollama loopback transport, and the operator must independently verify that the selected model does not forward images elsewhere.
 
 ## Try it
 
@@ -75,6 +75,16 @@ vera-vision watch --kind file --source demo.mp4 --fps 2 --frames 80 --seconds 60
 ```
 
 Output is machine-readable JSONL with `observer="VERA"`, source kind, frame sequence, dropped-frame count, typed temporal evidence and `action_authority=false`. The CLI prints a session-end record when it completes. It does not save or publish images. If FFmpeg is unavailable, a file/window is missing, or a stream cannot be decoded, it fails without revealing FFmpeg stderr or private URLs.
+
+### Optional local scene interpretation
+
+An explicit `--local-vision-model` choice lets Vera's Vision pipeline periodically send selected frames to a **loopback Ollama image-capable model** and receive tightly validated scene categories. For example:
+
+```powershell
+vera-vision watch --kind window --source "Chiaki" --fps 2 --seconds 90 --frames 120 --local-vision-model "YOUR_IMAGE_CAPABLE_MODEL" --local-vision-interval 5
+```
+
+The default pipeline makes **no model requests**. The local adapter never enables controller effects. A model's descriptions remain **untrusted inference**, not verified reality. It uses no automatic model downloads, no remote inference URL, and no default cloud service. [Local observer architecture and safeguards](docs/LOCAL_VISION_OBSERVER.md) explain exactly what is implemented and what is not qualified.
 
 ### Integrating Vera as an actual visual consumer
 
