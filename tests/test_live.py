@@ -90,8 +90,8 @@ def test_vera_receives_ordered_observations_and_no_raw_pixels_in_events():
     assert events[1]["dropped_frames"] == 1
     assert events[0]["observer"] == "VERA"
     assert events[0]["session_id"] == "vera-observer"
-    assert events[1]["captured_at_monotonic"] == 11.0
-    assert events[1]["timestamp_basis"] == "SOURCE_HOST_MONOTONIC"
+    assert events[1]["decoded_at_monotonic"] == 11.0
+    assert events[1]["timestamp_basis"] == "OBSERVER_HOST_DECODE_MONOTONIC"
     assert events[1]["temporal"]["status"] == "PIXEL_CHANGE_DETECTED"
     assert not events[1]["action_authority"]
     assert not events[1]["image_pixels_included"]
