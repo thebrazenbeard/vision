@@ -58,10 +58,10 @@ class VideoSource:
 
 @dataclass(frozen=True, slots=True)
 class VideoFrame:
-    """One decoded frame. capture_time is monotonic, not a world-clock timestamp."""
+    """One decoded frame. The timestamp is when the observer decoded it, not when the source recorded it."""
 
     sequence: int
-    captured_at: float
+    decoded_at_monotonic: float
     frame: RGBFrame
     dropped_since_previous: int
 
@@ -149,12 +149,15 @@ class FFmpegFrames:
     def close(self) -> None:
         self._stop()
 
-    def frames(self, *, max_frames: int = 100, max_seconds: float = 60) -> Iterator[VideoFrame]:
+    def frames(self, *, max_frames: int = 100, max_seconds: float = 60,
+               max_idle_seconds: float = 10.0) -> Iterator[VideoFrame]:
         """Return up to max_frames or max_seconds; explicit finite bounds mandatory."""
         if type(max_frames) is not int or not 1 <= max_frames <= 100_000:
             raise ValueError("max_frames out of bounds")
         if type(max_seconds) not in (int, float) or not math.isfinite(max_seconds) or not 0.1 <= max_seconds <= 3600:
             raise ValueError("max_seconds out of bounds")
+        if type(max_idle_seconds) not in (int, float) or not math.isfinite(max_idle_seconds) or not 0.05 <= max_idle_seconds <= 60:
+            raise ValueError("max_idle_seconds out of bounds")
         if self._process is not None:
             raise RuntimeError("reader already active")
         frame_bytes = self.source.width * self.source.height * 3
@@ -203,6 +206,7 @@ class FFmpegFrames:
         start = self.clock()
         last_sequence = 0
         delivered = 0
+        last_frame_time = start
         try:
             while delivered < max_frames:
                 remaining = max_seconds - (self.clock() - start)
@@ -213,16 +217,27 @@ class FFmpegFrames:
                 except queue.Empty:
                     if completed.is_set() and buffer.empty():
                         break
+                    if self.clock() - last_frame_time >= max_idle_seconds:
+                        raise VideoSourceError(
+                            "LIVE_VIDEO_NO_FRAMES_TIMEOUT" if delivered == 0
+                            else "LIVE_VIDEO_FRAME_IDLE_TIMEOUT"
+                        )
                     continue
                 dropped = max(0, sequence - last_sequence - 1)
                 last_sequence = sequence
                 delivered += 1
+                last_frame_time = self.clock()
                 yield VideoFrame(sequence, captured_at,
                                  RGBFrame(self.source.width, self.source.height, data),
                                  dropped)
             if errors:
                 raise VideoSourceError(errors[0])
-            if delivered == 0 and completed.is_set():
-                raise VideoSourceError("VIDEO_STREAM_EMPTY_OR_UNDECODABLE")
+            if delivered == 0:
+                if completed.is_set():
+                    raise VideoSourceError("VIDEO_STREAM_EMPTY_OR_UNDECODABLE")
+                raise VideoSourceError("LIVE_VIDEO_NO_FRAMES_TIMEOUT")
+            if (self.source.kind in ("stream", "window")
+                    and completed.is_set() and delivered < max_frames):
+                raise VideoSourceError("LIVE_VIDEO_SOURCE_ENDED")
         finally:
             self._stop()
