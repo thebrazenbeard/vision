@@ -17,6 +17,8 @@ from .temporal import TemporalAnalyzer, TemporalObservation
 class VisionEvent:
     """One bounded, evidence-labeled observation from a decoded video frame."""
 
+    session_id: str
+    captured_at_monotonic: float
     sequence: int
     dropped_frames: int
     source_kind: str
@@ -27,6 +29,9 @@ class VisionEvent:
             "schema": "VERA_VISION_LIVE_EVENT_V1",
             "kind": "FRAME_OBSERVED",
             "observer": "VERA",
+            "session_id": self.session_id,
+            "captured_at_monotonic": self.captured_at_monotonic,
+            "timestamp_basis": "SOURCE_HOST_MONOTONIC",
             "source_kind": self.source_kind,
             "sequence": self.sequence,
             "dropped_frames": self.dropped_frames,
@@ -57,7 +62,7 @@ class VisionPipeline:
         )
         if on_frame is not None:
             on_frame(packet, observation)
-        return VisionEvent(packet.sequence, packet.dropped_since_previous, source_kind, observation)
+        return VisionEvent(session_id, packet.captured_at, packet.sequence, packet.dropped_since_previous, source_kind, observation)
 
     def run(self, frames: Iterable[VideoFrame], *, session_id: str, source_kind: str,
             output: TextIO | None = None,
