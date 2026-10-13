@@ -165,6 +165,7 @@ def test_default_loopback_transport_refuses_redirects_and_http_proxies():
     observer = LocalOllamaObserver(model="image-model")
     handlers = observer.opener.__self__.handlers
     assert any(isinstance(h, _DenyRedirect) for h in handlers)
-    assert any(type(h) is ProxyHandler and not h.proxies for h in handlers)
+    # urllib can omit a ProxyHandler with no configured proxies entirely.
+    assert not any(isinstance(h, ProxyHandler) and bool(h.proxies) for h in handlers)
     redirect = next(h for h in handlers if isinstance(h, _DenyRedirect))
     assert redirect.redirect_request(None, None, 302, "redirect", {}, "https://example.com") is None
