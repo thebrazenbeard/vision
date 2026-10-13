@@ -15,7 +15,7 @@ import re
 import struct
 from typing import Callable
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 from urllib.error import URLError
 import zlib
 
@@ -23,6 +23,15 @@ from .frames import RGBFrame
 from .live import VideoFrame
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api/generate"
+
+
+class _DenyRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# Never follow an Ollama redirect to another host, and do not use OS HTTP proxies.
+_LOCAL_OPENER = build_opener(ProxyHandler({}), _DenyRedirect())
 MAX_VISION_PIXELS = 640 * 360
 SCENES = frozenset({"gameplay", "desktop", "menu", "outdoor", "indoor", "unknown"})
 VISIBLE = frozenset({"person", "animal", "vehicle", "structure", "screen", "terrain", "text", "other"})
@@ -118,7 +127,7 @@ class LocalOllamaObserver:
 
     def __init__(self, *, model: str, endpoint: str = DEFAULT_ENDPOINT,
                  timeout_seconds: float = 20,
-                 opener: Callable[..., object] = urlopen) -> None:
+                 opener: Callable[..., object] | None = None) -> None:
         if (type(model) is not str or not _MODEL_NAME.fullmatch(model)
                 or model.lower().endswith(":cloud")
                 or any(part in ("", ".", "..") for part in model.split("/"))):
@@ -129,7 +138,7 @@ class LocalOllamaObserver:
         self.model = model
         self.endpoint = _checked_endpoint(endpoint)
         self.timeout = float(timeout_seconds)
-        self.opener = opener
+        self.opener = opener if opener is not None else _LOCAL_OPENER.open
 
     def _parse(self, payload: object) -> SemanticObservation:
         if type(payload) is not dict or payload.get("done") is not True:
