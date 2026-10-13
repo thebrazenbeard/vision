@@ -157,3 +157,14 @@ def test_cli_exposes_explicit_local_model_only_not_enabled_by_default():
                                     "--local-vision-interval", "3"])
     assert selected.local_vision_model == "gemma4:4b"
     assert selected.local_vision_interval == 3
+
+
+def test_default_loopback_transport_refuses_redirects_and_http_proxies():
+    from vera_vision.local_vision import _DenyRedirect
+    from urllib.request import ProxyHandler
+    observer = LocalOllamaObserver(model="image-model")
+    handlers = observer.opener.__self__.handlers
+    assert any(isinstance(h, _DenyRedirect) for h in handlers)
+    assert any(type(h) is ProxyHandler and not h.proxies for h in handlers)
+    redirect = next(h for h in handlers if isinstance(h, _DenyRedirect))
+    assert redirect.redirect_request(None, None, 302, "redirect", {}, "https://example.com") is None
