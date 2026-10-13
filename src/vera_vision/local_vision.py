@@ -119,7 +119,9 @@ class LocalOllamaObserver:
     def __init__(self, *, model: str, endpoint: str = DEFAULT_ENDPOINT,
                  timeout_seconds: float = 20,
                  opener: Callable[..., object] = urlopen) -> None:
-        if type(model) is not str or not _MODEL_NAME.fullmatch(model) or model.endswith(":cloud"):
+        if (type(model) is not str or not _MODEL_NAME.fullmatch(model)
+                or model.lower().endswith(":cloud")
+                or any(part in ("", ".", "..") for part in model.split("/"))):
             raise ValueError("explicit local image-capable model required")
         if (type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds)
                 or not 1 <= timeout_seconds <= 60):
