@@ -26,6 +26,7 @@ class VisionEvent:
         return {
             "schema": "VERA_VISION_LIVE_EVENT_V1",
             "kind": "FRAME_OBSERVED",
+            "observer": "VERA",
             "source_kind": self.source_kind,
             "sequence": self.sequence,
             "dropped_frames": self.dropped_frames,
