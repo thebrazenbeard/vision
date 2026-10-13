@@ -88,12 +88,13 @@ def test_vera_receives_ordered_observations_and_no_raw_pixels_in_events():
     assert count == 2
     assert [e["sequence"] for e in events] == [1, 3]
     assert events[1]["dropped_frames"] == 1
+    assert events[0]["observer"] == "VERA"
     assert events[1]["temporal"]["status"] == "PIXEL_CHANGE_DETECTED"
     assert not events[1]["action_authority"]
     assert not events[1]["image_pixels_included"]
     assert len(delivered) == 2
     assert delivered[-1][0].frame == b
-    assert "255" not in output.getvalue()  # No raw pixel arrays.
+    assert "\"rgb\":" not in output.getvalue()  # No raw pixel payloads.
 
 
 def test_reader_rejects_nonfinite_bounds_and_cannot_launch_unsafe_binary():
