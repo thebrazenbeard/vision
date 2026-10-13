@@ -18,7 +18,7 @@ class VisionEvent:
     """One bounded, evidence-labeled observation from a decoded video frame."""
 
     session_id: str
-    captured_at_monotonic: float
+    decoded_at_monotonic: float
     sequence: int
     dropped_frames: int
     source_kind: str
@@ -30,8 +30,8 @@ class VisionEvent:
             "kind": "FRAME_OBSERVED",
             "observer": "VERA",
             "session_id": self.session_id,
-            "captured_at_monotonic": self.captured_at_monotonic,
-            "timestamp_basis": "SOURCE_HOST_MONOTONIC",
+            "decoded_at_monotonic": self.decoded_at_monotonic,
+            "timestamp_basis": "OBSERVER_HOST_DECODE_MONOTONIC",
             "source_kind": self.source_kind,
             "sequence": self.sequence,
             "dropped_frames": self.dropped_frames,
@@ -58,21 +58,26 @@ class VisionPipeline:
             packet.frame,
             session_id=session_id,
             step=packet.sequence,
-            monotonic_seconds=packet.captured_at,
+            monotonic_seconds=packet.decoded_at_monotonic,
         )
         if on_frame is not None:
             on_frame(packet, observation)
-        return VisionEvent(session_id, packet.captured_at, packet.sequence, packet.dropped_since_previous, source_kind, observation)
+        return VisionEvent(session_id, packet.decoded_at_monotonic, packet.sequence, packet.dropped_since_previous, source_kind, observation)
 
     def run(self, frames: Iterable[VideoFrame], *, session_id: str, source_kind: str,
             output: TextIO | None = None,
             on_frame: Callable[[VideoFrame, TemporalObservation], None] | None = None) -> int:
         total = 0
-        for packet in frames:
-            event = self.observe(packet, session_id=session_id,
-                                 source_kind=source_kind, on_frame=on_frame)
-            if output is not None:
-                output.write(json.dumps(event.to_dict(), separators=(",", ":"), allow_nan=False) + "\n")
-                output.flush()
-            total += 1
-        return total
+        try:
+            for packet in frames:
+                event = self.observe(packet, session_id=session_id,
+                                     source_kind=source_kind, on_frame=on_frame)
+                if output is not None:
+                    output.write(json.dumps(event.to_dict(), separators=(",", ":"), allow_nan=False) + "\n")
+                    output.flush()
+                total += 1
+            return total
+        finally:
+            closer = getattr(frames, "close", None)
+            if callable(closer):
+                closer()
