@@ -23,6 +23,7 @@ def parser() -> argparse.ArgumentParser:
     watch.add_argument("--height", type=int, default=180)
     watch.add_argument("--frames", type=int, default=100, help="max decoded observations")
     watch.add_argument("--seconds", type=float, default=60, help="max elapsed seconds")
+    watch.add_argument("--idle-seconds", type=float, default=10, help="maximum time without a decoded frame")
     watch.add_argument("--ffmpeg", default="ffmpeg", help="FFmpeg executable name or path")
     return app
 
@@ -34,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         # A session belongs to Vera's observer; "ARK" is one possible *source*.
         video = FFmpegFrames(source, binary=args.ffmpeg)
         observed = VisionPipeline().run(
-            video.frames(max_frames=args.frames, max_seconds=args.seconds),
+            video.frames(max_frames=args.frames, max_seconds=args.seconds,
+                         max_idle_seconds=args.idle_seconds),
             session_id=str(uuid.uuid4()), source_kind=source.kind, output=sys.stdout,
         )
     except (VideoSourceError, ValueError) as exc:
