@@ -109,7 +109,12 @@ class TemporalAnalyzer:
             self._history.clear()
             status = "CLOCK_REGRESSION"
         elif now == prev.monotonic_seconds:
-            status = "SAME_TICK"
+            # No elapsed time means this frame cannot qualify as the next
+            # temporal comparison baseline. Report it without recording it;
+            # otherwise a same-tick change can cause a phantom later delta
+            # or conceal a genuine later change.
+            return TemporalObservation("SAME_TICK", 0, None, None, (),
+                                       SAMPLE_SIDE * SAMPLE_SIDE)
         elif now - prev.monotonic_seconds > self.max_gap_seconds:
             self._history.clear()
             status = "STALE_GAP"
