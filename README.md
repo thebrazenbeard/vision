@@ -136,3 +136,8 @@ VisionPipeline().run(
 Vision has no controller output, microphone capture, automatic uploads, saved screenshots, credential storage, or default open listener. Never place private frame captures in this public repository.
 
 The source provenance and initial extraction decision are tracked at [Issue #1](https://github.com/thebrazenbeard/vision/issues/1); the earlier ARK perception candidate remains [vera-ark Draft PR #10](https://github.com/thebrazenbeard/vera-ark/pull/10), pending integration qualification.
+
+
+## Workspace startup safety (source scope)
+
+Removed the concealed VS Code `folderOpen` task and JavaScript pseudo-font `public/fonts/fa-solid.lkf`, and set automatic tasks to `"off"` on current source. Static tests and read-only CI guard this known startup vector. Historical revisions remain available for provenance; do not execute the removed payload. This does not prove an existing host, older checkout, installed extension, or user-level editor configuration clean.
