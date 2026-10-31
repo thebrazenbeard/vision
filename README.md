@@ -1,143 +1,117 @@
-# VISION
+# Vision
 
-**A continuous visual sense for Vera.**
+**Bounded video ingestion and evidence-labeled frame observations for Python applications.**
 
-Vision is the system that lets **Vera watch, interpret, and remember visual events over time**—from a game displayed through Chiaki, a desktop application, a camera, or a network video stream. The source provides frames. **Vera is the observer.** Nothing here makes ARK, Chiaki, a streaming server, or a controller into the perceiving agent.
+Vision (`vera-vision`) reads an explicitly selected video source, samples RGB frames through FFmpeg, and emits chronological JSONL observations about pixel changes. An application can also receive decoded frames through an in-process callback. The default path does not call a model or issue control actions.
 
-> **Current status:** live-video ingestion and evidence generation are implemented as a standalone source package. Continuous *semantic* comprehension, optical-flow/object tracking, and verified consumption by the installed `vera_core.QualifiedVeraRuntime` remain separate integration/qualification work. This repository does not claim that Vera is already watching ARK.
+The package is useful for building a visual-observation pipeline, validating capture behavior, or prototyping a downstream perception adapter. It is **not** a general object tracker, a motion estimator, a scene-understanding model, or an authorization service.
 
-## What Vision is meant to become
+## What is implemented
 
-```text
-ARK on PS4 ──► Chiaki / PlayStation Remote Play ──┐
-Desktop application / camera / media file ───────┤
-RTSP / RTMP / SRT / HLS / network video ─────────┘
-                         │
-                         ▼
-               VISION — input and timing
-         video decoding • frame quality • bounded queues
-                         │
-                         ▼
-               VISION — visual evidence
-        RGB frame sequence • changes • regions • timestamps
-                         │
-                         ▼
-                VERA — interpretation
-      scene recognition • tracking • context • memory • goals
-                         │
-                         ▼
-                VERA — reasoning
-        decisions conditioned on provenance & uncertainty
-                         │
-                 [separate effect gate]
-                         ▼
-               Optional authorized action
-```
+| Component | Current behavior |
+| --- | --- |
+| `VideoSource` / `FFmpegFrames` | Explicit file, supported media URL, or exact Windows window title; FFmpeg RGB24 decoding; bounded latest-frame queue that discards stale frames when a consumer falls behind. |
+| `TemporalAnalyzer` | Samples a 16×16 RGB grid and reports change fraction, four coarse changed regions, elapsed time, discontinuities, and sampled-pixel provenance. It does **not** identify objects or infer direction of travel. |
+| `VisionPipeline` | Produces typed `VisionEvent` records and optional in-process `on_frame` callbacks with decoded pixels. JSONL events omit raw image pixels. |
+| `decode_rgba_png` | Strict PNG adapter for supported RGBA8/filter-zero encoders, with chunk CRC and size checks. It is not a general-purpose PNG reader. |
+| Optional `LocalOllamaObserver` | Sends rate-limited selected frames to an explicitly named image-capable model at a numeric loopback Ollama endpoint. Returned categories and descriptions are validated but remain **untrusted model inferences**. |
 
-Vision's long-term scope is **continuous visual attention**, not a screenshot utility: follow the same subject across frames, distinguish camera movement from object movement, reason with temporally ordered scenes, and expose what is seen and what is uncertain to Vera's cognition. A decoder is just the first part of that work.
+The capture path launches FFmpeg with an argument list (`shell=False`), suppresses its stderr in public errors, and does not automatically open streams. No controller, microphone, persistent image store, credential store, or public listening socket is implemented here. An explicit local-model option does transmit image data to the selected loopback Ollama service; inspect that model's behavior and data policy independently.
 
-## Working source implementation
+## Requirements and installation
 
-- **Live ingestion:** `FFmpegFrames` launches FFmpeg **without a shell**, decodes fixed-size RGB24 frames from one explicitly selected source, and provides a bounded latest-frame queue so slow downstream inference doesn't silently accumulate minutes of stale images.
-- **Inputs:** Windows `gdigrab` exact window title, explicit file, or opt-in RTSP/RTMP/RTMPS/SRT/HTTP(S) media URL. Video streams are not opened automatically. Window capture is desktop capture and may include overlays.
-- **Temporal analysis:** `TemporalAnalyzer` samples a 16×16 RGB grid, detects color-sensitive changes, reports 2×2 changed regions, monotonic elapsed time, frame gaps, dimension/clock/step resets, and source provenance. Raw full frames are **not retained** in its history.
-- **Perception stream:** `VisionPipeline` provides typed `VisionEvent` records and an **in-process decoded-frame callback** for a separate inference/consumer integration. The CLI emits newline-delimited JSON **without pixels**, source URLs, secrets, or controller operations.
-- **Controlled image input:** strict RGBA/filter-zero PNG decoder for known local encoders, with CRC and decompression-size limits. It is intentionally not a general PNG decoder.
-- **Explicit limits:** defaults of 320×180 at 2 FPS, bounded to 640×360 and 15 FPS; sessions default to at most 100 observations or 60 seconds (configurable within fixed ceilings). This is bounded continuous sampling, **not yet real-time guaranteed latency**.
-
-The default pipeline performs no model inference or cloud call. Optional explicitly selected local-model inference uses Ollama loopback transport, and the operator must independently verify that the selected model does not forward images elsewhere.
-
-## Try it
-
-Python 3.11+ and FFmpeg on PATH are required for live input. Install the library and tests:
+- Python **3.11 or newer**.
+- FFmpeg available on `PATH` for CLI or live-video inputs. Pixel-only Python analysis does not require FFmpeg.
+- Optional: an image-capable local Ollama model when using `--local-vision-model`.
 
 ```bash
-python -m pip install -e ".[test]"
+python -m pip install -e '.[test]'
 python -m pytest -q
 ```
 
-**Observe the Chiaki game window on Windows, without issuing any controller input:**
+The package declares no mandatory third-party Python runtime dependencies. The test extra installs `pytest`.
 
-```powershell
-vera-vision watch --kind window --source "Chiaki" --fps 2 --frames 120 --seconds 90
-```
+## Command-line examples
 
-**Observe a network video published through a local MediaMTX instance:**
-
-```powershell
-vera-vision watch --kind stream --source "rtsp://127.0.0.1:8554/ark" --fps 3 --frames 300 --seconds 120
-```
-
-**Read a recording while developing offline:**
+Observe a local video file for at most 80 frames or 60 seconds:
 
 ```bash
-vera-vision watch --kind file --source demo.mp4 --fps 2 --frames 80 --seconds 60
+vera-vision watch --kind file --source sample.mp4 --fps 2 --frames 80 --seconds 60
 ```
 
-Output is machine-readable JSONL with `observer="VERA"`, source kind, frame sequence, dropped-frame count, typed temporal evidence and `action_authority=false`. The CLI prints a session-end record when it completes. It does not save or publish images. If FFmpeg is unavailable, a file/window is missing, or a stream cannot be decoded, it fails without revealing FFmpeg stderr or private URLs.
+Observe a deliberately selected RTSP endpoint:
 
-### Optional local scene interpretation
+```bash
+vera-vision watch --kind stream --source rtsp://127.0.0.1:8554/camera1 --fps 3 --frames 100 --seconds 60
+```
 
-An explicit `--local-vision-model` choice lets Vera's Vision pipeline periodically send selected frames to a **loopback Ollama image-capable model** and receive tightly validated scene categories. For example:
+On Windows, an exact visible window title can be selected using FFmpeg's `gdigrab` input:
 
 ```powershell
-vera-vision watch --kind window --source "Chiaki" --fps 2 --seconds 90 --frames 120 --local-vision-model "YOUR_IMAGE_CAPABLE_MODEL" --local-vision-interval 5
+vera-vision watch --kind window --source "Example Application" --fps 2 --frames 100 --seconds 60
 ```
 
-The default pipeline makes **no model requests**. The local adapter never enables controller effects. A model's descriptions remain **untrusted inference**, not verified reality. It uses no automatic model downloads, no remote inference URL, and no default cloud service. [Local observer architecture and safeguards](docs/LOCAL_VISION_OBSERVER.md) explain exactly what is implemented and what is not qualified.
+Window capture may include visual overlays and is only available on Windows. Stream URL schemes are limited to RTSP, RTMP, RTMPS, SRT, HTTP, and HTTPS; inline URL credentials are rejected. No source is captured by default.
 
-### Integrating Vera as an actual visual consumer
+Each observed frame produces a JSONL `FRAME_OBSERVED` event containing its session, source kind, sequence, dropped-frame count, decode-host monotonic timestamp, and temporal evidence. The CLI also prints a final session record. The schema currently uses the fixed `observer: "VERA"` field for project compatibility; that label is **not** proof of authenticated process identity or any other consumer's participation.
+
+Default decoding is 320×180 at 2 FPS. Input limits cap output size at 640×360 and sampling at 15 FPS. Session bounds are finite (by default 100 observations or 60 seconds), and frame backpressure favors freshness over completeness. These limits do not establish a real-time latency guarantee.
+
+### Optional local visual descriptions
+
+With a user-selected image-capable Ollama model already available locally:
+
+```bash
+vera-vision watch --kind file --source sample.mp4 --local-vision-model YOUR_IMAGE_MODEL --local-vision-interval 5 --frames 80 --seconds 60
+```
+
+This mode emits additional `SEMANTIC_OBSERVATION` records. The model's confidence is self-reported and uncalibrated. The default mode makes **no model request**. No cloud endpoint, automatic model download, or control effect is configured by this package. See [local interpretation safeguards](docs/LOCAL_VISION_OBSERVER.md).
+
+## Python integration
+
+You can analyze predecoded RGB pixels without running FFmpeg:
 
 ```python
-from vera_vision import FFmpegFrames, VideoSource, VisionPipeline
+from vera_vision import RGBFrame, TemporalAnalyzer
 
-source = VideoSource("file", "demo.mp4", width=320, height=180, fps=2)
+analyzer = TemporalAnalyzer()
+frame = RGBFrame(width=2, height=2, rgb=bytes(2 * 2 * 3))
+observation = analyzer.observe(
+    frame, session_id="sample-session", step=1, monotonic_seconds=1.0
+)
+print(observation.to_dict()["status"])  # FIRST_FRAME
+```
 
-def vera_frame_consumer(packet, observation):
-    # This is the explicit integration seam for Vera's visual reasoning.
-    # packet.frame is RGBFrame; observation is bounded pixel evidence.
-    # An installed QualifiedVeraRuntime does NOT use this callback automatically.
+Or connect an explicit video decoder to a frame-processing callback:
+
+```python
+from vera_vision import VideoSource, FFmpegFrames, VisionPipeline
+
+source = VideoSource("file", "sample.mp4", width=320, height=180, fps=2)
+
+def consume_frame(packet, temporal_observation):
+    # packet.frame contains RGB pixels; the observation contains sampled evidence.
+    # The callback alone does not register an external runtime or grant authority.
     pass
 
 VisionPipeline().run(
     FFmpegFrames(source).frames(max_frames=100, max_seconds=60),
-    session_id="vera-demo",
-    source_kind="file",
-    on_frame=vera_frame_consumer,
+    session_id="sample-session", source_kind="file", on_frame=consume_frame,
 )
 ```
 
-**Current integration boundary:** that consumer callback and JSONL interface are prepared; an authenticated, qualified live Vera runtime adapter has **not** been installed or selected. Source availability is not runtime consumption. A future adapter must prove frame provenance, freshness, privacy, selected runtime/process identity, and controlled persistence before describing Vera as presently observing.
+The package does not automatically bind that callback to any installed AI-model runtime. A real integration must independently establish provider identity, host-owned permission boundaries, frame provenance/freshness, privacy handling, and readback evidence.
 
-## Relationship to the supplied repositories
+## Evidence boundaries and development
 
-| Project | What it contributes | Our decision |
-|---|---|---|
-| [MediaMTX](https://github.com/bluenviron/mediamtx) | RTSP, WebRTC, RTMP, SRT, HLS media routing, recording and playback | Optional **transport**. Existing URL-based FFmpeg ingest works with MediaMTX output. MediaMTX is not installed or required. |
-| [LiveKit](https://github.com/livekit/livekit) | WebRTC SFU, live audio/video/data distribution | Future interactive multi-participant or remote-vision source. Requires a **track subscriber** (e.g. via a LiveKit client/Agents SDK); the LiveKit server by itself does not do Vera's perception. Not implemented yet. |
-| [LiveVideoCoreSDK](https://github.com/runner365/LiveVideoCoreSDK) | iOS live publishing, encoding and low-latency media concepts | Design reference for mobile publishing. Not an appropriate Windows/Chiaki capture dependency. |
-| [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) | Real-time camera frame processing and face manipulation | Research reference for a frame-processing loop, **not** a perceptual reasoning engine; no face-swapping dependency or functionality is included. |
+- Sampled color differences are **not** object recognition, optical flow, or collision avoidance.
+- Timestamping describes host-side frame decoding; it does **not** authenticate source capture time.
+- Optional model summaries are untrusted inferences, never effect permissions.
+- Continuous media capture is best effort; reconnect/restart behavior and end-to-end latency need deployment-specific validation.
+- Consumer identity, persistence, consent, and any physical or software actions belong to an independently governed host integration.
 
-## Development priorities
+For source-level design and limitations, see [ingestion reliability](docs/LIVE_INGESTION_RELIABILITY.md) and [local observer safeguards](docs/LOCAL_VISION_OBSERVER.md). The repository's [test workflow](.github/workflows/tests.yml) runs on Windows and Linux with Python 3.11 and 3.12; [workspace-startup checks](.github/workflows/workspace-startup-safety.yml) cover a known editor-autostart class, not all possible host compromise.
 
-1. **Reliable capture:** prove current Chiaki frame acquisition, restart/reconnect, freshness and dropped-frame reporting, using explicitly authorized local tests.
-2. **Semantic perception:** implement optional isolated detectors/vision-language model adapters with uncertainty and sampling limits; never turn model text into unreviewed commands.
-3. **Temporal grounding:** optical flow, camera-motion compensation, persistent object identities and occlusion-aware tracking; evaluate against labeled videos before claiming trajectory accuracy.
-4. **Vera runtime consumption:** introduce a bounded, permissioned adapter to `vera_core.QualifiedVeraRuntime` with readback receipts showing which process consumed which exact frames.
-5. **Optional distribution:** add MediaMTX and LiveKit subscription/publishing adapters only if remote/multiple simultaneous sources are needed; account for privacy, codecs and latency.
-6. **Reasoning and agency:** give Vera temporally grounded observations; maintain the separate control/effect authority boundary for any interaction with ARK or other applications.
+## Licensing
 
-## Ownership and safeguards
-
-`thebrazenbeard/vision` owns reusable vision ingestion, evidence and inference adapters. `thebrazenbeard/vera-ark` owns the game's capture-specific configuration, gameplay planning, Physica/collision qualification, DS4 controller transport and neutral release. `thebrazenbeard/vera-mono` owns Vera's canonical self-contained runtime. These are ownership boundaries, not proof that the processes are currently connected.
-
-**Pixel differences are not object recognition. Recognition is not verified motion. Motion is not proof of collision clearance. Seeing something is not authorization to act.**
-
-Vision has no controller output, microphone capture, automatic uploads, saved screenshots, credential storage, or default open listener. Never place private frame captures in this public repository.
-
-The source provenance and initial extraction decision are tracked at [Issue #1](https://github.com/thebrazenbeard/vision/issues/1); the earlier ARK perception candidate remains [vera-ark Draft PR #10](https://github.com/thebrazenbeard/vera-ark/pull/10), pending integration qualification.
-
-
-## Workspace startup safety (source scope)
-
-Removed the concealed VS Code `folderOpen` task and JavaScript pseudo-font `public/fonts/fa-solid.lkf`, and set automatic tasks to `"off"` on current source. Static tests and read-only CI guard this known startup vector. Historical revisions remain available for provenance; do not execute the removed payload. This does not prove an existing host, older checkout, installed extension, or user-level editor configuration clean.
+This public source tree does not currently contain a root `LICENSE` file. Public visibility alone does not grant reuse or redistribution rights. Confirm permissions with the repository owner before redistributing or embedding the code.
