@@ -25,6 +25,7 @@ class FrameSummary:
     width: int
     height: int
     samples: tuple[int, ...]
+    full_sha256: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,7 @@ class TemporalObservation:
     provenance: str = "SAMPLED_RGB_PIXELS"
     semantic_state: str = "UNKNOWN"
     action_authority: bool = False
+    full_frame_bytes_changed: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -51,6 +53,7 @@ class TemporalObservation:
             "provenance": self.provenance,
             "semantic_state": self.semantic_state,
             "action_authority": self.action_authority,
+            "full_frame_bytes_changed": self.full_frame_bytes_changed,
         }
 
 
@@ -78,6 +81,7 @@ class TemporalAnalyzer:
         self._clock = clock
         self.max_gap_seconds = float(max_gap_seconds)
         self._history: deque[FrameSummary] = deque(maxlen=history_size)
+        self._last_seen_step: int | None = None
 
     @property
     def history(self) -> tuple[FrameSummary, ...]:
@@ -93,23 +97,28 @@ class TemporalAnalyzer:
         if not math.isfinite(now):
             raise ValueError("clock invalid")
         samples = sample_rgb(frame)
-        record = FrameSummary(session_id, step, now, sha256(frame.rgb).hexdigest()[:16],
-                              frame.width, frame.height, samples)
+        digest = sha256(frame.rgb).hexdigest()
+        record = FrameSummary(session_id, step, now, digest[:16],
+                              frame.width, frame.height, samples, digest)
         prev = self._history[-1] if self._history else None
+        previous_step = self._last_seen_step
+        self._last_seen_step = step
         if prev is None or prev.session_id != session_id:
             self._history.clear()
             status = "FIRST_FRAME"
         elif (prev.width, prev.height) != (frame.width, frame.height):
             self._history.clear()
             status = "DIMENSIONS_CHANGED"
-        elif step <= prev.step:
+        elif previous_step is not None and step <= previous_step:
             self._history.clear()
             status = "STEP_REGRESSION"
         elif now < prev.monotonic_seconds:
             self._history.clear()
             status = "CLOCK_REGRESSION"
         elif now == prev.monotonic_seconds:
-            status = "SAME_TICK"
+            # Observe ordering, but do not displace the qualified comparison frame.
+            return TemporalObservation("SAME_TICK", 0, None, None, (),
+                                       SAMPLE_SIDE * SAMPLE_SIDE)
         elif now - prev.monotonic_seconds > self.max_gap_seconds:
             self._history.clear()
             status = "STALE_GAP"
@@ -130,7 +139,8 @@ class TemporalAnalyzer:
             self._history.append(record)
             return TemporalObservation(status, round((now - prev.monotonic_seconds) * 1000),
                                        sum(changed) / len(changed), sum(diff) / len(diff),
-                                       tuple(regions), SAMPLE_SIDE * SAMPLE_SIDE)
+                                       tuple(regions), SAMPLE_SIDE * SAMPLE_SIDE,
+                                       full_frame_bytes_changed=(record.full_sha256 != prev.full_sha256))
         self._history.append(record)
         return TemporalObservation(status, 0 if status == "SAME_TICK" else None,
                                    None, None, (), SAMPLE_SIDE * SAMPLE_SIDE)
